@@ -15,8 +15,9 @@ This was made using an [online-go.com userscript](https://github.com/SoumyaK4/OG
 
 **Screenshots:**
 
-<img width="1440" height="738" alt="Screenshot (158)" src="https://github.com/user-attachments/assets/ea24eb55-00d7-4eaf-b56d-453661f4c4cd" />
 <img width="1440" height="738" alt="Screenshot (157)" src="https://github.com/user-attachments/assets/a729a022-f7b2-4294-abbd-205b84ffe258" />
+<img width="1440" height="738" alt="Screenshot (158)" src="https://github.com/user-attachments/assets/ea24eb55-00d7-4eaf-b56d-453661f4c4cd" />
+
 
 
 

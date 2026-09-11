@@ -1,0 +1,521 @@
+// ==UserScript==
+// @name         Lichess Custom Background 
+// @namespace    https://lichess.org
+// @version      1.1.26
+// @description  Allows the user to customize the background, toggle the chatbox with 'T', and adjust the opacity of the move box with a slider
+// @author       Modified from OGS Userscript by soumyak4.in
+// @match        https://lichess.org/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const DEFAULT_BG = 'https://raw.githubusercontent.com/JaKooLit/Wallpaper-Bank/main/wallpapers/Lake.png';
+    const KEYS = { mode: 'lichess-background-mode', bg: 'lichess-custom-bg', moveBoxOpacity: 'lichess-movebox-opacity' };
+    let lastPath = '';
+
+    // Check if the current page is a game, training, or study page with an ID
+    const isTargetPage = () => {
+        const path = location.pathname;
+
+        // If it's precisely /study or /study/, it's the list view, so exclude it
+        if (/^\/study\/?$/.test(path)) {
+            return false;
+        }
+
+        return document.querySelector('.cg-board-wrap') !== null ||
+               /^\/[a-zA-Z0-9]{8,12}(\/(white|black))?$/.test(path) ||
+               path.startsWith('/training') ||
+               /^\/study\/[a-zA-Z0-9]+/.test(path);
+    };
+
+    // Check if the current page has analysis features (Standalone, Post-Game, or Study)
+    const isAnalysisOrStudyAnalysisPage = () => {
+        const path = location.pathname;
+
+        // Standalone /analysis path
+        if (path.startsWith('/analysis')) return true;
+
+        // Post-game analysis boards dynamically spawn these specific tool/move containers
+        if (document.querySelector('.analyse__app, .analyse__tools, .analyse__moves') !== null) {
+            return true;
+        }
+
+        // Studies that have an active move list
+        if (path.startsWith('/study') && document.querySelector('div.moves') !== null) {
+            return true;
+        }
+
+        return false;
+    };
+
+    // Retrieve or return default opacity for move box (0 to 1)
+    const getMoveBoxOpacity = () => {
+        const val = localStorage.getItem(KEYS.moveBoxOpacity);
+        return val !== null ? parseFloat(val) : 0.15;
+    };
+
+    // Inject required styles cleanly, using a hardware-accelerated background layer to prevent board animation lag
+    const injectCSS = () => {
+        if (document.getElementById('lichess-cosmetic-styles')) return;
+
+        const style = document.createElement('style');
+        style.id = 'lichess-cosmetic-styles';
+        style.textContent = `
+            /* Hardware-accelerated fixed background container to eliminate piece lag */
+            #lichess-custom-bg-layer {
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                z-index: -999999 !important;
+                pointer-events: none !important;
+                background-size: cover !important;
+                background-position: center !important;
+                background-repeat: no-repeat !important;
+                will-change: transform;
+            }
+
+            html.lichess-native-background #lichess-custom-bg-layer {
+                display: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+    };
+
+    // Update dynamic styles like the move box opacity
+    const updateDynamicStyles = () => {
+        let style = document.getElementById('lichess-dynamic-styles');
+        if (!style) {
+            style = document.createElement('style');
+            style.id = 'lichess-dynamic-styles';
+            document.head.appendChild(style);
+        }
+
+        const opacity = isAnalysisOrStudyAnalysisPage() ? getMoveBoxOpacity() : 0;
+
+        // If opacity is set to 1 (full), match the lighter Lichess game info box color (#262421)
+        const moveBoxBg = opacity >= 1
+            ? '#262421 !important'
+            : `rgba(22, 21, 18, ${opacity}) !important`;
+
+        style.textContent = `
+            html.lichess-cosmetic-active:not(.lichess-native-background) body,
+            html.lichess-cosmetic-active:not(.lichess-native-background) main,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .site,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .content,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .round__app,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .training__app,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .study__app,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .analyse__app {
+                background-color: transparent !important;
+                background-image: none !important;
+            }
+
+            /* Keep the move history table background transparent or tinted based on slider (Analysis/Study analysis only) */
+            html.lichess-cosmetic-active:not(.lichess-native-background) .analyse__moves,
+            html.lichess-cosmetic-active:not(.lichess-native-background) div.moves {
+                background: ${moveBoxBg};
+                background-color: ${moveBoxBg};
+                background-image: none !important;
+                backdrop-filter: ${opacity > 0 && opacity < 1 ? 'blur(4px)' : 'none'} !important;
+                box-shadow: ${opacity > 0 ? '0 2px 4px rgba(0,0,0,0.3)' : 'none'} !important;
+            }
+
+            html.lichess-cosmetic-active:not(.lichess-native-background) .analyse__moves * {
+                background-color: transparent !important;
+            }
+
+            /* Keep bottom panels and tools transparent, restoring game metadata / player info to opaque */
+            html.lichess-cosmetic-active:not(.lichess-native-background) .analyse__metas,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .ruser,
+            html.lichess-cosmetic-active:not(.lichess-native-background) div.tauser,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .analyse__tools {
+                background: transparent !important;
+                background-color: transparent !important;
+                box-shadow: none !important;
+            }
+
+            /* Make top engine evaluation lines, variations, and game metadata / player info boxes opaque with a lighter Lichess shade */
+            html.lichess-cosmetic-active:not(.lichess-native-background) .rmaps,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .ceval,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .acpl,
+            html.lichess-cosmetic-active:not(.lichess-native-background) .game__meta {
+                background: #262421 !important;
+                background-color: #262421 !important;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+                backdrop-filter: none !important;
+            }
+
+            html.lichess-cosmetic-active #top,
+            html.lichess-cosmetic-active header,
+            html.lichess-cosmetic-active .site-header {
+                background-color: #161512 !important;
+                opacity: 1 !important;
+                backdrop-filter: none !important;
+            }
+
+            #lichess-set-background-container {
+                position: fixed !important;
+                bottom: 15px !important;
+                z-index: 2147483647 !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                gap: 8px !important;
+            }
+
+            #lichess-set-background-btn {
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 6px !important;
+                padding: 7px 12px !important;
+                font-family: inherit !important;
+                font-size: 13px !important;
+                font-weight: 500 !important;
+                color: #fff !important;
+                background: rgba(30, 30, 30, 0.9) !important;
+                border: 1px solid rgba(255, 255, 255, 0.2) !important;
+                border-radius: 6px !important;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+                cursor: pointer !important;
+                line-height: normal !important;
+                transition: background 150ms ease, transform 150ms ease !important;
+            }
+
+            #lichess-set-background-btn:hover {
+                background: rgba(50, 50, 50, 0.98) !important;
+                transform: translateY(-1px) !important;
+            }
+
+            #lichess-opacity-slider-wrapper {
+                display: inline-flex !important;
+                align-items: center !important;
+                gap: 8px !important;
+                padding: 7px 12px !important;
+                background: rgba(30, 30, 30, 0.9) !important;
+                border: 1px solid rgba(255, 255, 255, 0.2) !important;
+                border-radius: 6px !important;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+                color: #fff !important;
+                font-family: inherit !important;
+                font-size: 13px !important;
+                font-weight: 500 !important;
+                width: 175px !important;
+                box-sizing: border-box !important;
+                overflow: hidden !important;
+            }
+
+            #lichess-opacity-slider-wrapper input[type="range"] {
+                -webkit-appearance: none !important;
+                appearance: none !important;
+                background: transparent !important;
+                border: none !important;
+                outline: none !important;
+                box-shadow: none !important;
+                width: 100% !important;
+                flex: 1 !important;
+                cursor: pointer !important;
+                margin: 0 !important;
+                box-sizing: border-box !important;
+            }
+
+            #lichess-opacity-slider-wrapper input[type="range"]::-webkit-slider-runnable-track {
+                height: 5px !important;
+                background: rgba(255, 255, 255, 0.25) !important;
+                border-radius: 3px !important;
+                border: none !important;
+            }
+
+            #lichess-opacity-slider-wrapper input[type="range"]::-webkit-slider-thumb {
+                -webkit-appearance: none !important;
+                appearance: none !important;
+                width: 14px !important;
+                height: 14px !important;
+                border-radius: 50% !important;
+                background: #e1e1e1 !important;
+                border: 2px solid #363432 !important;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important;
+                margin-top: -4.5px !important;
+            }
+
+            #lichess-opacity-slider-wrapper input[type="range"]::-moz-range-track {
+                height: 5px !important;
+                background: rgba(255, 255, 255, 0.25) !important;
+                border-radius: 3px !important;
+                border: none !important;
+            }
+
+            #lichess-opacity-slider-wrapper input[type="range"]::-moz-range-thumb {
+                width: 14px !important;
+                height: 14px !important;
+                border: 2px solid #363432 !important;
+                border-radius: 50% !important;
+                background: #e1e1e1 !important;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important;
+            }
+
+            #lichess-background-menu {
+                position: fixed !important;
+                top: 50% !important;
+                left: 50% !important;
+                z-index: 2147483647 !important;
+                width: min(28rem, calc(100vw - 2rem)) !important;
+                padding: 1.2rem !important;
+                box-sizing: border-box !important;
+                transform: translate(-50%, -50%) !important;
+                color: #fff !important;
+                background: #222 !important;
+                border: 1px solid rgba(255, 255, 255, 0.12) !important;
+                border-radius: 8px !important;
+                box-shadow: 0 0 25px rgba(0, 0, 0, 0.65) !important;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+                text-align: center !important;
+            }
+
+            #lichess-background-menu .actions {
+                display: flex !important;
+                flex-wrap: wrap !important;
+                justify-content: center !important;
+                gap: 0.5rem !important;
+                margin-top: 1rem !important;
+            }
+
+            #lichess-background-menu button {
+                padding: 0.5rem 0.8rem !important;
+                border: 1px solid rgba(255, 255, 255, 0.2) !important;
+                border-radius: 4px !important;
+                color: #fff !important;
+                background: #333 !important;
+                cursor: pointer !important;
+                font: inherit !important;
+            }
+
+            #lichess-background-menu button:hover {
+                background: #444 !important;
+            }
+
+            /* Styles for chatbox toggling */
+            body.lichess-chat-hidden .mchat,
+            body.lichess-chat-hidden .chat__members,
+            body.lichess-chat-hidden .study__side .chat,
+            body.lichess-chat-hidden aside.mchat {
+                display: none !important;
+            }
+        `;
+    };
+
+    // Apply or clear custom background image rules using an isolated background layer
+    const applyBackground = () => {
+        const useDefault = localStorage.getItem(KEYS.mode) === 'lichess';
+        document.documentElement.classList.toggle('lichess-native-background', useDefault);
+
+        let bgLayer = document.getElementById('lichess-custom-bg-layer');
+        if (!bgLayer) {
+            bgLayer = document.createElement('div');
+            bgLayer.id = 'lichess-custom-bg-layer';
+            document.body.prepend(bgLayer);
+        }
+
+        if (useDefault) {
+            bgLayer.style.removeProperty('background-image');
+            return;
+        }
+
+        const url = localStorage.getItem(KEYS.bg) || DEFAULT_BG;
+        bgLayer.style.setProperty('background-image', `url(${JSON.stringify(url)})`, 'important');
+    };
+
+    // Align button container left edge with the side panels or board
+    const updateButtonPosition = () => {
+        const container = document.getElementById('lichess-set-background-container');
+        if (!container) return;
+
+        const targetElement = document.querySelector('.puzzle__side, .training__side, .round__side, .mchat, .chat__members, .analyse__side, .cg-board-wrap');
+        if (targetElement) {
+            const rect = targetElement.getBoundingClientRect();
+            if (rect.left > 0) {
+                container.style.left = `${rect.left}px`;
+                return;
+            }
+        }
+        container.style.left = '15px';
+    };
+
+    // Open settings menu modal
+    const openMenu = () => {
+        document.getElementById('lichess-background-menu')?.remove();
+
+        const menu = document.createElement('div');
+        menu.id = 'lichess-background-menu';
+        menu.innerHTML = `
+            <p style="margin:0 0 1rem;font-weight:bold;font-size:1.1rem;">Set Background</p>
+            <div class="actions">
+                <button data-action="lichess">Use Lichess Default</button>
+                <button data-action="reset">Use Script Default</button>
+                <button data-action="url">From Image URL</button>
+                <button data-action="upload">Upload from PC</button>
+                <button data-action="close">Cancel</button>
+            </div>
+        `;
+        document.body.appendChild(menu);
+
+        menu.addEventListener('click', (e) => {
+            const action = e.target.getAttribute('data-action');
+            if (!action) return;
+
+            if (action === 'lichess') {
+                localStorage.setItem(KEYS.mode, 'lichess');
+                applyBackground();
+            } else if (action === 'reset') {
+                localStorage.removeItem(KEYS.bg);
+                localStorage.removeItem(KEYS.mode);
+                applyBackground();
+            } else if (action === 'url') {
+                const url = prompt('Enter image URL:');
+                if (url?.trim()) {
+                    localStorage.setItem(KEYS.bg, url.trim());
+                    localStorage.removeItem(KEYS.mode);
+                    applyBackground();
+                }
+            } else if (action === 'upload') {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = () => {
+                    const file = input.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        try {
+                            localStorage.setItem(KEYS.bg, reader.result);
+                            localStorage.removeItem(KEYS.mode);
+                            applyBackground();
+                        } catch {
+                            alert('Image file is too large for browser storage.');
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                };
+                input.click();
+            }
+            menu.remove();
+        });
+    };
+
+    // Create and append the toggle button and opacity slider container
+    const setupButton = () => {
+        const existingContainer = document.getElementById('lichess-set-background-container');
+        const shouldHaveSlider = isAnalysisOrStudyAnalysisPage();
+        const hasSlider = document.getElementById('lichess-opacity-slider-wrapper') !== null;
+
+        if (existingContainer && (shouldHaveSlider === hasSlider)) {
+            return;
+        }
+        existingContainer?.remove();
+
+        const container = document.createElement('div');
+        container.id = 'lichess-set-background-container';
+
+        const btn = document.createElement('button');
+        btn.id = 'lichess-set-background-btn';
+        btn.innerHTML = `<i class="fa fa-picture-o"></i><span>Set Background</span>`;
+        btn.onclick = openMenu;
+
+        container.appendChild(btn);
+
+        if (shouldHaveSlider) {
+            const sliderWrapper = document.createElement('div');
+            sliderWrapper.id = 'lichess-opacity-slider-wrapper';
+
+            const currentOpacity = getMoveBoxOpacity();
+            sliderWrapper.innerHTML = `
+                <label for="lichess-movebox-opacity-slider" title="Move Box Opacity">Opacity</label>
+                <input type="range" id="lichess-movebox-opacity-slider" min="0" max="1" step="0.01" value="${currentOpacity}">
+            `;
+
+            const slider = sliderWrapper.querySelector('input');
+            slider.addEventListener('input', (e) => {
+                const val = e.target.value;
+                localStorage.setItem(KEYS.moveBoxOpacity, val);
+                updateDynamicStyles();
+            });
+
+            container.appendChild(sliderWrapper);
+        }
+
+        document.body.appendChild(container);
+        updateButtonPosition();
+    };
+
+    // Setup keyboard listener to toggle chatbox on pressing 'T'
+    const setupChatToggle = () => {
+        if (window._lichessChatToggleInitialized) return;
+        window._lichessChatToggleInitialized = true;
+
+        document.addEventListener('keydown', (e) => {
+            const activeTag = document.activeElement?.tagName?.toLowerCase();
+            const isEditing = activeTag === 'input' || activeTag === 'textarea' || document.activeElement?.isContentEditable;
+
+            if (isEditing) return;
+
+            if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+                document.body.classList.toggle('lichess-chat-hidden');
+                updateButtonPosition();
+            }
+        });
+    };
+
+    // Main execution cycle on page change/mutation
+    const run = () => {
+        const active = isTargetPage();
+        document.documentElement.classList.toggle('lichess-cosmetic-active', active);
+
+        if (!active) {
+            document.getElementById('lichess-set-background-container')?.remove();
+            document.getElementById('lichess-custom-bg-layer')?.remove();
+            lastPath = location.pathname;
+            return;
+        }
+
+        if (location.pathname !== lastPath) {
+            lastPath = location.pathname;
+            document.body.classList.add('lichess-chat-hidden');
+        }
+
+        injectCSS();
+        updateDynamicStyles();
+        applyBackground();
+        setupButton();
+        updateButtonPosition();
+    };
+
+    // Observers and event bindings
+    const init = () => {
+        run();
+        setupChatToggle();
+        new MutationObserver(run).observe(document.body, { childList: true, subtree: true });
+        window.addEventListener('popstate', run);
+        window.addEventListener('resize', () => { run(); updateButtonPosition(); });
+    };
+
+    if (document.body) init();
+    else document.addEventListener('DOMContentLoaded', init, { once: true });
+})();// ==UserScript==
+// @name         New Userscript
+// @namespace    http://tampermonkey.net/
+// @version      2026-09-11
+// @description  try to take over the world!
+// @author       You
+// @match        https://lichess.org/uFN6LuQ6/white#20
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=lichess.org
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Your code here...
+})();

@@ -1,11 +1,9 @@
 This is a lichess userscript to customize background on lichess webpages containing a board.
 
 Features:
-"Set background" button at the bottom-left of the page, which lets you upload a background image from pc or url.
-
-Adjust the opacity of the movelist section with a slider at the bottom left.
-
-Press T to toggle chatbox on/off on analysis page. It is off by default to have more of the background.
+1. "Set background" button at the bottom-left of the page, which lets you upload a background image from pc or url.
+2. Adjust the opacity of the movelist section with a slider at the bottom left.
+3. Press T to toggle chatbox on/off on analysis page. It is off by default to have more of the background.
 
 How to install:
 1. Install tampermonkey browser extension.
